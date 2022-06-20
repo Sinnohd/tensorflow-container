@@ -13,6 +13,8 @@
 # limitations under the License.
 # ============================================================================
 
+# adapted from https://github.com/tensorflow/tensorflow/blob/master/tensorflow/tools/dockerfiles/dockerfiles/gpu.Dockerfile
+
 ARG UBUNTU_VERSION=20.04
 
 ARG ARCH=
@@ -154,4 +156,4 @@ ARG TF_PACKAGE=tensorflow-gpu
 RUN     ${PIP} install --no-cache-dir ${TF_PACKAGE}
 
 WORKDIR /benchmarks/scripts/tf_cnn_benchmarks/
-CMD time python tf_cnn_benchmarks.py --num_gpus=$GPU --batch_size=$BATCH_SIZE --model=resnet50 --variable_update=parameter_server --data_format=NHWC --device=gpu --summary_verbosity=1          
+CMD time python tf_cnn_benchmarks.py --num_gpus=$GPU --batch_size=$BATCH_SIZE --model=resnet50 --variable_update=parameter_server --data_format=NHWC --device=gpu --summary_verbosity=1
