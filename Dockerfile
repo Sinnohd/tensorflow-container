@@ -1,4 +1,4 @@
-# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,69 +12,122 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
+#
+# THIS IS A GENERATED DOCKERFILE.
+#
+# This file was assembled from multiple pieces, whose use is documented
+# throughout. Please refer to the TensorFlow dockerfiles documentation
+# for more information.
 
-# adapted from https://github.com/tensorflow/tensorflow/blob/master/tensorflow/tools/dockerfiles/dockerfiles/gpu.Dockerfile
+ARG UBUNTU_VERSION=20.04
 
-ARG UBUNTU_VERSION=16.04
+ARG ARCH=
+ARG CUDA=11.2
+FROM nvidia/cuda${ARCH:+-$ARCH}:${CUDA}.1-base-ubuntu${UBUNTU_VERSION} as base
+# ARCH and CUDA are specified again because the FROM directive resets ARGs
+# (but their default value is retained if set previously)
+ARG ARCH
+ARG CUDA
+ARG CUDNN=8.1.0.77-1
+ARG CUDNN_MAJOR_VERSION=8
+ARG LIB_DIR_PREFIX=x86_64
+ARG LIBNVINFER=7.2.2-1
+ARG LIBNVINFER_MAJOR_VERSION=7
 
-FROM nvidia/cuda:9.0-base-ubuntu${UBUNTU_VERSION} as base
+# Let us install tzdata painlessly
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Needed for string substitution
+SHELL ["/bin/bash", "-c"]
+# Pick up some TF dependencies
+RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cuda-command-line-tools-${CUDA/./-} \
+        libcublas-${CUDA/./-} \
+        cuda-nvrtc-${CUDA/./-} \
+        libcufft-${CUDA/./-} \
+        libcurand-${CUDA/./-} \
+        libcusolver-${CUDA/./-} \
+        libcusparse-${CUDA/./-} \
+        curl \
+        libcudnn8=${CUDNN}+cuda${CUDA} \
+        libfreetype6-dev \
+        libhdf5-serial-dev \
+        libzmq3-dev \
+        pkg-config \
+        software-properties-common \
+        unzip
+
+# Install TensorRT if not building for PowerPC
+# NOTE: libnvinfer uses cuda11.1 versions
+RUN [[ "${ARCH}" = "ppc64le" ]] || { apt-get update && \
+        apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub && \
+        echo "deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64 /"  > /etc/apt/sources.list.d/tensorRT.list && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends libnvinfer${LIBNVINFER_MAJOR_VERSION}=${LIBNVINFER}+cuda11.0 \
+        libnvinfer-plugin${LIBNVINFER_MAJOR_VERSION}=${LIBNVINFER}+cuda11.0 \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*; }
 
 # For CUDA profiling, TensorFlow requires CUPTI.
-ENV LD_LIBRARY_PATH /usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH /usr/local/cuda-11.0/targets/x86_64-linux/lib:/usr/local/cuda/extras/CUPTI/lib64:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
-ARG PYTHON=python3
-
-ENV TF_NEED_CUDA 1
-ENV TF_NEED_TENSORRT 1
-ENV TF_CUDA_COMPUTE_CAPABILITIES=3.5,5.2,6.0,6.1,7.0
-ENV TF_CUDA_VERSION=9.0
-ENV TF_CUDNN_VERSION=7
-
-# NCCL 2.x
-ENV TF_NCCL_VERSION=2
+# Link the libcuda stub to the location where tensorflow is searching for it and reconfigure
+# dynamic linker run-time bindings
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && echo "/usr/local/cuda/lib64/stubs" > /etc/ld.so.conf.d/z-cuda-stubs.conf \
+    && ldconfig
 
 # See http://bugs.python.org/issue19846
 ENV LANG C.UTF-8
 
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip
+
+RUN python3 -m pip --no-cache-dir install --upgrade \
+    "pip<20.3" \
+    setuptools
+
+# Some TF tools expect a "python" binary
+RUN ln -s $(which python3) /usr/local/bin/python
+
+# Options:
+#   tensorflow
+#   tensorflow-gpu
+#   tf-nightly
+#   tf-nightly-gpu
+# Set --build-arg TF_PACKAGE_VERSION=1.11.0rc0 to install a specific version.
+# Installs the latest version by default.
+ARG TF_PACKAGE=tensorflow
+ARG TF_PACKAGE_VERSION=
+RUN python3 -m pip install --no-cache-dir ${TF_PACKAGE}${TF_PACKAGE_VERSION:+==${TF_PACKAGE_VERSION}}
+
 COPY bashrc /etc/bash.bashrc
+RUN chmod a+rwx /etc/bash.bashrc
+
+# Adding dependencies
 
 # Pick up some TF dependencies
 RUN chmod a+rx /etc/bash.bashrc \
-        && apt-get update && apt-get install -y --no-install-recommends \
+        && apt-get update && apt-get install -y --no-install-recommends --allow-unauthenticated \
         git \
         time \
         build-essential \
-        cuda-command-line-tools-9-0 \
-        cuda-cublas-9-0 \
-        cuda-cufft-9-0 \
-        cuda-curand-9-0 \
-        cuda-cusolver-9-0 \
-        cuda-cusparse-9-0 \
         curl \
-        libcudnn7=7.2.1.38-1+cuda9.0 \
-        libnccl2=2.2.13-1+cuda9.0 \
-        libfreetype6-dev \
-        libhdf5-serial-dev \
-        libpng12-dev \
-        libzmq3-dev \
         pkg-config \
         rsync \
         software-properties-common \
         unzip \
-        && apt-get update \
-        && apt-get install nvinfer-runtime-trt-repo-ubuntu1604-4.0.1-ga-cuda9.0 \
-        && apt-get update \
-        && apt-get install libnvinfer4=4.1.2-1+cuda9.0 \
-        && apt-get update && apt-get install -y \
-            ${PYTHON} \
-            ${PYTHON}-pip \
         && apt-get clean \
-        && rm -rf /var/lib/apt/lists/* \
-        && ln -s $(which ${PYTHON}) /usr/local/bin/python # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
-        
-RUN git clone https://github.com/tensorflow/benchmarks.git \
-        && cd /benchmarks/ \
-        && git checkout cnn_tf_v1.9_compatible
+        && rm -rf /var/lib/apt/lists/* 
+
+# Update PIP
+RUN python -m pip install --upgrade pip
+
+# Adding benchmarks
+RUN git clone https://github.com/tensorflow/benchmarks.git 
 
 WORKDIR /benchmarks/scripts/tf_cnn_benchmarks/
 CMD time python tf_cnn_benchmarks.py --batch_size=32 --model=resnet50 --variable_update=parameter_server --data_format=NHWC --device=cpu --summary_verbosity=1
@@ -88,7 +141,8 @@ ARG PIP=pip3
 #   tf-nightly
 #   tf-nightly-gpu
 ARG TF_PACKAGE=tensorflow
-RUN     ${PIP} install --no-cache-dir ${TF_PACKAGE}
+#RUN     ${PIP} install --no-cache-dir ${TF_PACKAGE}
+RUN ${PIP} install -i https://pypi.anaconda.org/intel/simple numpy
 
 FROM base AS tensorflow-gpu
 ARG PIP=pip3
@@ -106,3 +160,4 @@ RUN     ${PIP} install --no-cache-dir ${TF_PACKAGE}
 
 WORKDIR /benchmarks/scripts/tf_cnn_benchmarks/
 CMD time python tf_cnn_benchmarks.py --num_gpus=$GPU --batch_size=$BATCH_SIZE --model=resnet50 --variable_update=parameter_server --data_format=NHWC --device=gpu --summary_verbosity=1
+          
